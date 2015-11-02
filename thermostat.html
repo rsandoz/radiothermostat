@@ -14,14 +14,21 @@
 </div>
   
 <script type='text/javascript'>
-var Tmode = {0:"Off",1:"Heat",2:"Cool"};
-var Mode = {0:"Off",1:"On"};
+var PIntensity = {0:"Off", 1:"25%", 2:"50%", 3:"100%", 4:"100%"};
+var Tmode = {0:"Off",1:"Heat",2:"Cool",3:"Auto"};
+var Day = {0:"Mon",1:"Tue",2:"Wed",3:"Thu",4:"Fri",5:"Sat",6:"Sun"};
+var OffOn = {0:"Off",1:"On"};
+var Fmode = {0:"Auto",1:"Circ",2:"On"};
 var setpoint = [];
 var tmode = [];
+var tstate = [];
 var fmode = [];
+var fstate = [];
 var override = [];
 var hold = [];
 var program_mode = [];
+var time = {day:0,hour:0,minute:0};
+var intensity = [];
 var ipaddress = [];
 var pollTimer = [];
 var outsideWeatherPollTimer = 0;
@@ -29,10 +36,19 @@ var setDelay = [];
 var setCommandDelay = 5000;
 var pollTimeout = 10000;
 var pollOutsideWeatherTimeout = 30000;
+var ignore_tstat = [];
+
+function LeadingZero(num) {
+  return (num<10?'0'+num:num);
+}
+
+function ToThermostatTime(obj) {
+  return Day[obj.day] + " " + obj.hour + ":" + LeadingZero(obj.minute);
+}
 
 function ToTime(num) {
   min = (num-(60*(num/60|0)));
-    return (num/60|0)+":" + (min<10?'0'+min:min);
+  return (num/60|0)+":" + LeadingZero(min);
 }
 
 function ToMinutes(str) {
@@ -42,7 +58,7 @@ function ToMinutes(str) {
 
 function Process_program(JSONData, num_tabs, mode) {
   console.log("Process_program_"+mode+"("+ipaddress[num_tabs]+")");
-  console.log(JSONData);
+  //console.log(JSONData);
   for(var i in JSONData)
     for(var j in JSONData[i])
       if (j%2==0)
@@ -53,7 +69,7 @@ function Process_program(JSONData, num_tabs, mode) {
 
 function ProcessWeather(JSONData) {
   console.log("ProcessWeather");
-  console.log(JSONData);
+  //console.log(JSONData);
   $("#outsidetemp-1").val("Outside Temp: " + JSONData.current_observation.temp_f + " F");
   $("#outsidetemp-2").val("Outside Temp: " + JSONData.current_observation.temp_f + " F");
   $("#humidity-1").val("Relative Humidity: " + JSONData.current_observation.relative_humidity);
@@ -62,107 +78,113 @@ function ProcessWeather(JSONData) {
   outsideWeatherPollTimer = setTimeout(PollOutsideWeather, pollOutsideWeatherTimeout);
 }
 
-function Process_tstat(JSONData, num_tabs) {
-  console.log("Process_tstat("+ipaddress[num_tabs]+")");
-  console.log(JSONData);
+function Process_night_light(JSONData, num_tabs) {
+  console.log("Process_night_light("+ipaddress[num_tabs]+")");
+  //console.log(JSONData);
 
-  tmode[num_tabs] = JSONData.tmode;
-  fmode[num_tabs] = JSONData.fmode;
-  override[num_tabs] = JSONData.override;
-  hold[num_tabs] = JSONData.hold;
-  program_mode[num_tabs] = JSONData.program_mode;
+  intensity[num_tabs] = JSONData.intensity;
 
-  $("#currenttemp-"+num_tabs).val("Current Temp: " + JSONData.temp + " F");
-  $("#tmode-"+num_tabs).val("Mode: " + Tmode[tmode[num_tabs]]);
-  $("#fmode-"+num_tabs).val("Fan: " + Mode[fmode[num_tabs]]);
-  $("#override-"+num_tabs).val("Override: " + Mode[override[num_tabs]]);
-  $("#hold-"+num_tabs).val("Hold: " + Mode[hold[num_tabs]]);
-  $("#program_mode-"+num_tabs).val("Program Mode: " + Mode[program_mode[num_tabs]]);
+  $("#nightLight-"+num_tabs).val("Night Light: " + PIntensity[JSONData.intensity]);
 
-  switch(Tmode[tmode[num_tabs]]) {
-    case 'Heat': if(setpoint[num_tabs] != JSONData.t_heat)
-                   setpoint[num_tabs] = JSONData.t_heat;
-                 $("#heat-"+num_tabs).prop("checked", true);
-                 break;
-    case 'Cool': if(setpoint[num_tabs] != JSONData.t_cool)
-                   setpoint[num_tabs] = JSONData.t_cool;
-                 $("#cool-"+num_tabs).prop("checked", true);
-                 break;
-    case 'Off':
-    default:     if(setpoint[num_tabs] != "70")
-                   setpoint[num_tabs] = "70";
-                 $("#off-"+num_tabs).prop("checked", true);
+  if ($("#nightLightModeSet-"+num_tabs+' input').button("option", "disabled"))
+    $('#nightLightModeSet-'+num_tabs + ' input').button("enable");
+  switch(intensity[num_tabs]) {
+    case 1: $("#nightLightMode25-"+num_tabs).prop("checked", true);
+            break;
+    case 2: $("#nightLightMode50-"+num_tabs).prop("checked", true);
+            break;
+    case 3: $("#nightLightMode75-"+num_tabs).prop("checked", true);
+            break;
+    case 4: $("#nightLightMode100-"+num_tabs).prop("checked", true);
+            break;
+    case 0:
+    default:$("#nightLightMode0-"+num_tabs).prop("checked", true);
   }
+  $('#nightLightModeSet-'+num_tabs).buttonset('refresh');
+}
 
-  $('#radioMode-'+num_tabs).buttonset('refresh');
+function Process_tstat(JSONData, num_tabs) {
+  if (!ignore_tstat[num_tabs]) {
+    console.log("Process_tstat("+ipaddress[num_tabs]+")");
+    console.log(JSONData);
 
-  if ($("#sliderSetpoint-"+num_tabs).slider( "values", 0 ) != setpoint[num_tabs])
-    $('#sliderSetpoint-'+num_tabs).slider("values", 0, setpoint[num_tabs]);
-  DisplaySetting(num_tabs);
+    tmode[num_tabs] = JSONData.tmode;
+    tstate[num_tabs] = JSONData.tstate;
+    fmode[num_tabs] = JSONData.fmode;
+    fstate[num_tabs] = JSONData.fstate;
+    override[num_tabs] = JSONData.override;
+    hold[num_tabs] = JSONData.hold;
+    program_mode[num_tabs] = JSONData.program_mode;
+    time[num_tabs] = JSONData.time;
+  
+    $("#currenttemp-"+num_tabs).val("Current Temp: " + JSONData.temp + " F");
+    $("#tmode-"+num_tabs).val("Mode: " + Tmode[tmode[num_tabs]]);
+    $("#tstate-"+num_tabs).val("State: " + Tmode[tstate[num_tabs]]);
+    $("#fmode-"+num_tabs).val("Fan: " + Fmode[fmode[num_tabs]]);
+    $("#fstate-"+num_tabs).val("FanState: " + OffOn[fstate[num_tabs]]);
+    $("#override-"+num_tabs).val("Override: " + OffOn[override[num_tabs]]);
+    $("#hold-"+num_tabs).val("Hold: " + OffOn[hold[num_tabs]]);
+    $("#program_mode-"+num_tabs).val("Program Mode: " + OffOn[program_mode[num_tabs]]);
+    $("#time-"+num_tabs).val("Tstat Time: " + ToThermostatTime(time[num_tabs]));
+  
+    if ($("#tstatModeSet-"+num_tabs+' input').button("option", "disabled"))
+      $('#tstatModeSet-'+num_tabs + ' input').button("enable");
+    if (hold[num_tabs]==1)
+      $("#tstatModeHold-"+num_tabs).prop("checked", true);
+    else if (override[num_tabs]==1)
+      $("#tstatModeTemp-"+num_tabs).prop("checked", true);
+    else
+      $("#tstatModeSched-"+num_tabs).prop("checked", true);
+    $('#tstatModeSet-'+num_tabs).buttonset('refresh');
+  
+    if ($("#hvacModeSet-"+num_tabs+' input').button("option", "disabled"))
+      $('#hvacModeSet-'+num_tabs + ' input').button("enable");
+    switch(tmode[num_tabs]) {
+      case 1:
+        if(setpoint[num_tabs] != JSONData.t_heat)
+          setpoint[num_tabs] = JSONData.t_heat;
+        $("#hvacModeHeat-"+num_tabs).prop("checked", true);
+        break;
+      case 2:
+        if(setpoint[num_tabs] != JSONData.t_cool)
+          setpoint[num_tabs] = JSONData.t_cool;
+        $("#hvacModeCool-"+num_tabs).prop("checked", true);
+        break;
+      case 3:
+        $("#hvacModeAuto-"+num_tabs).prop("checked", true);
+          break;
+      case 0:
+      default:
+        if(setpoint[num_tabs] != "70")
+          setpoint[num_tabs] = "70";
+        $("#hvacModeOff-"+num_tabs).prop("checked", true);
+    }
+    $('#hvacModeSet-'+num_tabs).buttonset('refresh');
+  
+  
+    // enable and initialize slider with setpoint first reading
+    if ($("#sliderSetpoint-"+num_tabs).slider( "option", "disabled" )) {
+      $("#sliderSetpoint-"+num_tabs).slider( "enable" );
+      $('#sliderSetpoint-'+num_tabs).slider("value", setpoint[num_tabs]);
+    }
+  
+    DisplayHVACMode(num_tabs);
+  } else
+    ignore_tstat[num_tabs] = false;
 
   pollTimer[num_tabs] = setTimeout(Poll, pollTimeout, num_tabs);
   //console.log("startingP("+pollTimer[num_tabs]+")");
 }
 
-/* curl.php
-<?php
-
-switch (strtolower($_SERVER["REQUEST_METHOD"])) {
-    case "post":
-        $command = $_POST['command'];
-        $data = $_POST['data'];
-
-        //error_log("command:" . $command);
-        error_log("POST:" . $command . $data);
-        
-        $options = array (
-          CURLOPT_HEADER         => false
-        , CURLOPT_RETURNTRANSFER => true
-        , CURLOPT_FOLLOWLOCATION => true
-        , CURLOPT_TIMEOUT        => 60
-        , CURLOPT_CONNECTTIMEOUT => 0
-        , CURLOPT_HTTPGET        => 1
-        , CURLOPT_URL            => $command
-        , CURLOPT_POST           => true
-        , CURLOPT_POSTFIELDS     => $data
-        );
-        break;
-    case "get":
-        $options = array (
-          CURLOPT_HEADER         => false
-        , CURLOPT_RETURNTRANSFER => true
-        , CURLOPT_FOLLOWLOCATION => true
-        , CURLOPT_TIMEOUT        => 60
-        , CURLOPT_CONNECTTIMEOUT => 0
-        , CURLOPT_HTTPGET        => 1
-        , CURLOPT_URL            => "http://" . $_GET['tstataddress'] . "/" . $_GET["service"]
-        );
-        break;
-    default:
-        throw new Exception("Unsupported request method.");
-        break;
-}
-
-$curl_handle = curl_init();
-curl_setopt_array($curl_handle, $options);
-$server_output = curl_exec($curl_handle);
-curl_close($curl_handle);
-
-if (isset($options[CURLOPT_POST]))
-  error_log($server_output);
-
-echo $server_output;
-?>
-*/
-
 function PostThermostat(ipaddress, service, data) {
-  $.post("http://"+ipaddress+"/"+service, data);
-  //$.post("curl.php", {'command':"http://"+ipaddress+"/"+service, 'data':data});
+  console.log("POST("+ipaddress+") service:"+service+" data:"+data);
+  //$.post("http://"+ipaddress+"/"+service, data);
+  $.post("curl.php", {'command':"http://"+ipaddress+"/"+service, 'data':data});
 }
 
 function GetThermostat(ipaddress, service, callback_function) {
-  $.getJSON("http://"+ipaddress+"/"+service, callback_function);
-  //$.getJSON("curl.php", "service="+service+"&tstataddress="+ipaddress, callback_function);
+  //$.getJSON("http://"+ipaddress+"/"+service, callback_function);
+  $.getJSON("curl.php", "service="+service+"&tstataddress="+ipaddress, callback_function);
 }
 
 function GetOutsideWeather() {
@@ -173,6 +195,7 @@ function Poll(num_tabs) {
   // Get the states so we stay in sync
   //console.log("clearing("+pollTimer[num_tabs]+")");
   clearTimeout(pollTimer[num_tabs]);
+  GetThermostat(ipaddress[num_tabs], "tstat/night_light", function(JSONData) {Process_night_light(JSONData, num_tabs)});
   GetThermostat(ipaddress[num_tabs], "tstat", function(JSONData) {Process_tstat(JSONData, num_tabs)});
 }
 
@@ -181,52 +204,65 @@ function PollOutsideWeather() {
   GetOutsideWeather();
 }
 
-function SetHeat(num_tabs) {
-  console.log("POST("+ipaddress[num_tabs]+") tmode:1,t_heat:"+setpoint[num_tabs]);
-  PostThermostat(ipaddress[num_tabs], "tstat", "{\"tmode\":1, \"t_heat\":"+setpoint[num_tabs]+"}");
+function SetHVACMode(num_tabs, data) {
+  PostThermostat(ipaddress[num_tabs], "tstat", data);
   pollTimer[num_tabs] = setTimeout(Poll, pollTimeout, num_tabs);
-  //console.log("startingH("+pollTimer[num_tabs]+")");
 }
 
-function SetCool(num_tabs) {
-  console.log("POST("+ipaddress[num_tabs]+") tmode:2,t_cool:"+setpoint[num_tabs]);
-  PostThermostat(ipaddress[num_tabs], "tstat", "{\"tmode\":2, \"t_cool\":"+setpoint[num_tabs]+"}");
+function SetHold(num_tabs) {
+  PostThermostat(ipaddress[num_tabs], "tstat", "{\"hold\":1}");
   pollTimer[num_tabs] = setTimeout(Poll, pollTimeout, num_tabs);
-  //console.log("startingC("+pollTimer[num_tabs]+")");
 }
 
-function SetOff(num_tabs) {
-  console.log("POST("+ipaddress[num_tabs]+") tmode:0");
-  PostThermostat(ipaddress[num_tabs], "tstat", "{\"tmode\":0}");
+function SetSchedule(num_tabs) {
+  PostThermostat(ipaddress[num_tabs], "tstat", "{\"hold\":1,\"program_mode\":1}");
   pollTimer[num_tabs] = setTimeout(Poll, pollTimeout, num_tabs);
-  //console.log("startingO("+pollTimer[num_tabs]+")");
 }
 
-function SetpointCommand(num_tabs) {
-  console.log("SetpointCommand("+ipaddress[num_tabs]+")");
-  //console.log("clearing("+pollTimer[num_tabs]+")");
+function IntensityCommand(num_tabs) {
+  PostThermostat(ipaddress[num_tabs], "tstat/night_light", "{\"intensity\":"+intensity[num_tabs]+"}");
+}
+
+function ScheduleCommand(num_tabs) {
+  console.log("ScheduleCommand("+ipaddress[num_tabs]+")");
+  clearTimeout(pollTimer[num_tabs]);
+  clearTimeout(setDelay[num_tabs]);
+  setDelay[num_tabs] = setTimeout(SetSchedule, setCommandDelay, num_tabs);
+}
+
+function HoldCommand(num_tabs) {
+  console.log("HoldCommand("+ipaddress[num_tabs]+")");
+  clearTimeout(pollTimer[num_tabs]);
+  clearTimeout(setDelay[num_tabs]);
+  setDelay[num_tabs] = setTimeout(SetHold, setCommandDelay, num_tabs);
+}
+
+function SetpointCommand(num_tabs, temporary) {
+  console.log("SetpointCommand("+ipaddress[num_tabs]+") temporary:"+temporary);
   clearTimeout(pollTimer[num_tabs]);
   clearTimeout(setDelay[num_tabs]);
 
-  switch(Tmode[tmode[num_tabs]]) {
-    case 'Heat': setDelay[num_tabs] = setTimeout(SetHeat, setCommandDelay, num_tabs);
-                 break;
-    case 'Cool': setDelay[num_tabs] = setTimeout(SetCool, setCommandDelay, num_tabs);
-                 break;
-    case 'Off':
-    default:     setDelay[num_tabs] = setTimeout(SetOff, setCommandDelay, num_tabs);
+  switch(tmode[num_tabs]) {
+    case 3: setDelay[num_tabs] = setTimeout(SetHVACMode, setCommandDelay, num_tabs, "{\"tmode\":3"+"}");
+            break;
+    case 1: setDelay[num_tabs] = setTimeout(SetHVACMode, setCommandDelay, num_tabs, "{\"t_heat\":"+setpoint[num_tabs]+(temporary?",\"hold\":0":"")+"}");
+            break;
+    case 2: setDelay[num_tabs] = setTimeout(SetHVACMode, setCommandDelay, num_tabs, "{\"t_cool\":"+setpoint[num_tabs]+"}");
+            break;
+    case 0: setDelay[num_tabs] = setTimeout(SetHVACMode, setCommandDelay, num_tabs, "{\"tmode\":0}");
+            break;
+    default:console.log("unknown tmode");
   }
 }
 
-//Insert content into the currently selected tab
 function InsertContent(content) {
   var activeTab = $("#tabs").tabs('option', 'active');   
   activeTab += 1;   
   $("#tab-" + activeTab).append(content);
 }
 
-function DisplaySetting(num_tabs) {
-  $("#setpoint-"+num_tabs).val(Tmode[tmode[num_tabs]] + (tmode[num_tabs]==0?"":(": " + setpoint[num_tabs] + " F")));
+function DisplayHVACMode(num_tabs) {
+  $("#setpoint-"+num_tabs).val(Tmode[tmode[num_tabs]] + (((tmode[num_tabs]==0)||(tmode[num_tabs]==3))?"":(": " + setpoint[num_tabs] + " F")));
 }
 
 function TimeRow(programMode, row, num_tabs) {
@@ -254,21 +290,47 @@ function SaveProgram(num_tabs, programMode) {
         strProgram += (j!=0?",":"") + $("#"+programMode+"-"+i+"-"+((j/2)|0)+"-"+num_tabs).val();
     strProgram += "]";
   }
-  console.log("save "+strProgram);
   PostThermostat(ipaddress[num_tabs], "tstat/program/"+programMode, "{"+strProgram+"}");
 }
 
 function AddTab(thermostat_ipaddress) {
   var num_tabs = $('div#tabs ul li.tab').length + 1;        
+
+  ipaddress[num_tabs] = thermostat_ipaddress;
+  tmode[num_tabs] = 0;
+  setpoint[num_tabs] = 50;
+  tstate[num_tabs] = 0;
+  fmode[num_tabs] = 0;
+  fstate[num_tabs] = 0;
+  override[num_tabs] = 0;
+  hold[num_tabs] = 0;
+  program_mode[num_tabs] = 0;
+  time[num_tabs] = {day:0,hour:0,minute:0};
+  intensity[num_tabs] = 0;
+  pollTimer[num_tabs] = 0;
+  setDelay[num_tabs] = 0;
+  ignore_tstat[num_tabs] = false;
+
   $('div#tabs ul').append('<li class="tab"><a href="#tab-' + num_tabs + '">' + thermostat_ipaddress + '</a></li>');
   $('div#tabs').append('<div id="tab-' + num_tabs + '"></div>');
   $('#tabs').tabs("refresh");
   $('#tabs').tabs("option", "active", -1); //makes the new tab active
   
-  InsertContent("<p><div id='radioMode-"+num_tabs+"'>"
-  +"<input type='radio' id='off-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='0' name='hvacMode-"+num_tabs+"'><label for='off-"+num_tabs+"'>Off</label>"
-  +"<input type='radio' id='heat-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='1' name='hvacMode-"+num_tabs+"'><label for='heat-"+num_tabs+"'>Heat</label>"
-  +"<input type='radio' id='cool-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='2' name='hvacMode-"+num_tabs+"'><label for='cool-"+num_tabs+"'>Cool</label>"
+  InsertContent(
+   "<table border=1 style='width:100%'>"
+  +"<tr>"
+  +"<td>"
+  +"<p><div id='tstatModeSet-"+num_tabs+"'>"
+  +"<input type='radio' id='tstatModeSched-"+num_tabs+"' class='tstatMode-"+num_tabs+"' value='0' name='tstatMode-"+num_tabs+"'><label for='tstatModeSched-"+num_tabs+"'>Schedule</label>"
+  +"<input type='radio' id='tstatModeHold-"+num_tabs+"' class='tstatMode-"+num_tabs+"' value='1' name='tstatMode-"+num_tabs+"'><label for='tstatModeHold-"+num_tabs+"'>Hold</label>"
+  +"<input type='radio' id='tstatModeAway-"+num_tabs+"' class='tstatMode-"+num_tabs+"' value='2' name='tstatMode-"+num_tabs+"'><label for='tstatModeAway-"+num_tabs+"'>Away</label>"
+  +"<input type='radio' id='tstatModeTemp-"+num_tabs+"' class='tstatMode-"+num_tabs+"' value='3' name='tstatMode-"+num_tabs+"'><label for='tstatModeTemp-"+num_tabs+"'>Temporary</label>"
+  +"</div></p>"
+  +"<p><div id='hvacModeSet-"+num_tabs+"'>"
+  +"<input type='radio' id='hvacModeOff-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='0' name='hvacMode-"+num_tabs+"'><label for='hvacModeOff-"+num_tabs+"'>Off</label>"
+  +"<input type='radio' id='hvacModeHeat-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='1' name='hvacMode-"+num_tabs+"'><label for='hvacModeHeat-"+num_tabs+"'>Heat</label>"
+  +"<input type='radio' id='hvacModeCool-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='2' name='hvacMode-"+num_tabs+"'><label for='hvacModeCool-"+num_tabs+"'>Cool</label>"
+  +"<input type='radio' id='hvacModeAuto-"+num_tabs+"' class='hvacMode-"+num_tabs+"' value='3' name='hvacMode-"+num_tabs+"'><label for='hvacModeAuto-"+num_tabs+"'>Auto</label>"
   +"</div></p>"
   +"<p><input type='text' id='setpoint-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;' /></p>"
   +"<p><div id='sliderSetpoint-"+num_tabs+"' style='width:350px;'></div></p>"
@@ -276,19 +338,34 @@ function AddTab(thermostat_ipaddress) {
   +"<p><input type='text' id='outsidetemp-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
   +"<p><input type='text' id='humidity-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
   +"<p><input type='text' id='tmode-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
+  +"<p><input type='text' id='tstate-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
   +"<p><input type='text' id='fmode-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
+  +"<p><input type='text' id='fstate-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
   +"<p><input type='text' id='override-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
   +"<p><input type='text' id='hold-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
   +"<p><input type='text' id='program_mode-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
-  +"<p><input type='text' id='program_mode-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
-+"<table border=1 style='width:100%'>"
-+"<tr>"
-+"<td>"
-+"<input type='button' id='heatrefresh-"+num_tabs+"' value='Refresh'/>"
-+"<input type='button' id='heatsave-"+num_tabs+"' value='Save'/>"
-+"<br>"
-+"<table border=1 style='width:100%'>"
-+"<tr>"
+  +"</td>"
+  +"<td>"
+  +"<p><input type='text' id='time-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;'/></p>"
+  +"<p><input type='text' id='nightLight-"+num_tabs+"' style='border:0; color:#f6931f; font-weight:bold;' /></p>"
+  +"<p><div id='nightLightModeSet-"+num_tabs+"'>"
+  +"<input type='radio' id='nightLightMode0-"+num_tabs+"' class='nightLightMode-"+num_tabs+"' value='0' name='nightLightMode-"+num_tabs+"'><label for='nightLightMode0-"+num_tabs+"'>Off</label>"
+  +"<input type='radio' id='nightLightMode25-"+num_tabs+"' class='nightLightMode-"+num_tabs+"' value='1' name='nightLightMode-"+num_tabs+"'><label for='nightLightMode25-"+num_tabs+"'>25%</label>"
+  +"<input type='radio' id='nightLightMode50-"+num_tabs+"' class='nightLightMode-"+num_tabs+"' value='2' name='nightLightMode-"+num_tabs+"'><label for='nightLightMode50-"+num_tabs+"'>50%</label>"
+  +"<input type='radio' id='nightLightMode75-"+num_tabs+"' class='nightLightMode-"+num_tabs+"' value='3' name='nightLightMode-"+num_tabs+"'><label for='nightLightMode75-"+num_tabs+"'>50%</label>"
+  +"<input type='radio' id='nightLightMode100-"+num_tabs+"' class='nightLightMode-"+num_tabs+"' value='4' name='nightLightMode-"+num_tabs+"'><label for='nightLightMode100-"+num_tabs+"'>100%</label>"
+  +"</div></p>"
+  +"</td>"
+  +"</tr>"
+  +"</table>"
+  +"<table border=1 style='width:100%'>"
+  +"<tr>"
+  +"<td>"
+  +"<input type='button' id='heatrefresh-"+num_tabs+"' value='Refresh'/>"
+  +"<input type='button' id='heatsave-"+num_tabs+"' value='Save'/>"
+  +"<br>"
+  +"<table border=1 style='width:100%'>"
+  +"<tr>"
   +"<th style='text-align:center'>Mon</th>"
   +"<th style='text-align:center'>Tue</th>"
   +"<th style='text-align:center'>Wed</th>"
@@ -296,19 +373,19 @@ function AddTab(thermostat_ipaddress) {
   +"<th style='text-align:center'>Fri</th>"
   +"<th style='text-align:center'>Sat</th>"
   +"<th style='text-align:center'>Sun</th>"
-+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 0, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 0, num_tabs)+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 1, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 1, num_tabs)+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 2, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 2, num_tabs)+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 3, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 3, num_tabs)+"</tr>"
-+"</table>"
-+"</td>"
-+"<td>"
-+"<input type='button' id='coolrefresh-"+num_tabs+"' value='Refresh'/>"
-+"<input type='button' id='coolsave-"+num_tabs+"' value='Save'/>"
-+"<br>"
-+"<table border=1 style='width:100%'>"
-+"<tr>"
+  +"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 0, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 0, num_tabs)+"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 1, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 1, num_tabs)+"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 2, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 2, num_tabs)+"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("heat", 3, num_tabs)+"</tr><tr></tr>"+TempRow("heat", 3, num_tabs)+"</tr>"
+  +"</table>"
+  +"</td>"
+  +"<td>"
+  +"<input type='button' id='coolrefresh-"+num_tabs+"' value='Refresh'/>"
+  +"<input type='button' id='coolsave-"+num_tabs+"' value='Save'/>"
+  +"<br>"
+  +"<table border=1 style='width:100%'>"
+  +"<tr>"
   +"<th style='text-align:center'>Mon</th>"
   +"<th style='text-align:center'>Tue</th>"
   +"<th style='text-align:center'>Wed</th>"
@@ -316,42 +393,79 @@ function AddTab(thermostat_ipaddress) {
   +"<th style='text-align:center'>Fri</th>"
   +"<th style='text-align:center'>Sat</th>"
   +"<th style='text-align:center'>Sun</th>"
-+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 0, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 0, num_tabs)+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 1, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 1, num_tabs)+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 2, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 2, num_tabs)+"</tr>"
-+"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 3, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 3, num_tabs)+"</tr>"
-+"</table>"
-+"</td>"
-+"</tr>"
-+"</table>"
-
+  +"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 0, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 0, num_tabs)+"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 1, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 1, num_tabs)+"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 2, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 2, num_tabs)+"</tr>"
+  +"<tr><td colspan=7 style='text-align:center'></td></tr><tr>"+TimeRow("cool", 3, num_tabs)+"</tr><tr></tr>"+TempRow("cool", 3, num_tabs)+"</tr>"
+  +"</table>"
+  +"</td>"
+  +"</tr>"
+  +"</table>"
   );
 
-  $('#radioMode-'+num_tabs).buttonset();
+  $('#hvacModeSet-'+num_tabs).buttonset();
+  $('#hvacModeSet-'+num_tabs + ' input').button("disable");
+
+  $('#tstatModeSet-'+num_tabs).buttonset();
+  $('#tstatModeSet-'+num_tabs + ' input').button("disable");
+
+  $('#nightLightModeSet-'+num_tabs).buttonset();
+  $('#nightLightModeSet-'+num_tabs + ' input').button("disable");
+
+  $('.tstatMode-'+num_tabs).change(function(event) {
+    console.log("tstatMode:" + $(this).val());
+    switch($(this).val()) {
+      case "1": // hold
+        ignore_tstat[num_tabs] = true;
+        HoldCommand(num_tabs);
+        break;
+      case "2":
+        break;
+      case "3": // temporary
+        ignore_tstat[num_tabs] = true;
+        SetpointCommand(num_tabs, true);
+        break;
+      case "0": // schedule
+        ignore_tstat[num_tabs] = true;
+        ScheduleCommand(num_tabs);
+        break;
+      default:
+        console.log("unknown tstatMode:" + $(this).val());
+        break;
+    }
+  });
 
   $('.hvacMode-'+num_tabs).change(function(event) {
     tmode[num_tabs] = $(this).val();
-    //console.log("changeRadio(" + num_tabs + ") " + tmode[num_tabs]);
-    DisplaySetting(num_tabs);
-    SetpointCommand(num_tabs);
+    DisplayHVACMode(num_tabs);
+    ignore_tstat[num_tabs] = true;
+    SetpointCommand(num_tabs, false);
+  });
+
+  $('.nightLightMode-'+num_tabs).change(function(event) {
+    intensity[num_tabs] = $(this).val();
+    IntensityCommand(num_tabs);
   });
 
   $('#sliderSetpoint-'+num_tabs).slider({
       range: false
+    , disabled: true
     , animate: true
     , min: 50
     , max: 100
-    , values: [70]
+    , value: setpoint[num_tabs]
     , slide: function(event, ui) {
-        setpoint[num_tabs] = ui.values[0];
-        DisplaySetting(num_tabs);
+        setpoint[num_tabs] = ui.value;
+        DisplayHVACMode(num_tabs);
       }
     , change: function(event, ui) {
-        setpoint[num_tabs] = ui.values[0];
+        setpoint[num_tabs] = ui.value;
         if (typeof event.which!='undefined') {
           //console.log("changeSlider(" + num_tabs + ") " + setpoint[num_tabs]);
-          SetpointCommand(num_tabs);
+          $('#tstatModeSet-'+num_tabs + ' input').button("disable");
+          ignore_tstat[num_tabs] = true;
+          SetpointCommand(num_tabs, false);
         }
       }
   });
@@ -384,25 +498,18 @@ function AddTab(thermostat_ipaddress) {
     SaveProgram(num_tabs, "heat");
   });
 
-  ipaddress[num_tabs] = thermostat_ipaddress;
-  tmode[num_tabs] = 0;
-  setpoint[num_tabs] = 70;
-  fmode[num_tabs] = 0;
-  override[num_tabs] = 0;
-  hold[num_tabs] = 0;
-  program_mode[num_tabs] = 0;
-
-  pollTimer[num_tabs] = 0;
-  setDelay[num_tabs] = 0;
-
   $('#currenttemp-'+num_tabs).val("Current Temp: " + 0 + " F");
   $('#outsidetemp-'+num_tabs).val("Outside Temp: " + 0 + " F");
   $('#humidity-'+num_tabs).val("Relative Humidity: 0");
   $('#tmode-'+num_tabs).val("Mode: " + Tmode[tmode[num_tabs]]);
-  $('#fmode-'+num_tabs).val("Fan: " + Mode[fmode[num_tabs]]);
-  $('#override-'+num_tabs).val("Override: " + Mode[override[num_tabs]]);
-  $('#hold-'+num_tabs).val("Hold: " + Mode[hold[num_tabs]]);
-  $('#program_mode-'+num_tabs).val("Program Mode: " + Mode[program_mode[num_tabs]]);
+  $('#tstate-'+num_tabs).val("State: " + Tmode[tstate[num_tabs]]);
+  $('#fmode-'+num_tabs).val("Fan: " + Fmode[fmode[num_tabs]]);
+  $('#fstate-'+num_tabs).val("FanState: " + OffOn[fstate[num_tabs]]);
+  $('#override-'+num_tabs).val("Override: " + OffOn[override[num_tabs]]);
+  $('#hold-'+num_tabs).val("Hold: " + OffOn[hold[num_tabs]]);
+  $('#program_mode-'+num_tabs).val("Program Mode: " + OffOn[program_mode[num_tabs]]);
+  $('#time-'+num_tabs).val("Tstat Time: " + ToThermostatTime(time[num_tabs]));
+  $('#nightLight-'+num_tabs).val("Night Light: " + PIntensity[0]);
 
   GetThermostat(ipaddress[num_tabs], "tstat/program/cool", function(JSONData) {Process_program(JSONData, num_tabs, "cool")});
   GetThermostat(ipaddress[num_tabs], "tstat/program/heat", function(JSONData) {Process_program(JSONData, num_tabs, "heat")});
